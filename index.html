@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <title>小手机</title>
+  <meta name="theme-color" content="#f3f1ee" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#151517" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="小手机">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon-180.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <header class="bar">
+      <div class="bar-side">
+        <button id="open-memory" class="text-button">记忆</button>
+      </div>
+      <div class="title"><span id="name">小手机</span></div>
+      <div class="bar-side end">
+        <button id="open-call" class="icon-button" aria-label="打电话">
+          <svg viewBox="0 0 24 24" width="21" height="21" aria-hidden="true"><path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.2.2 2.4.6 3.6.1.3 0 .7-.2 1l-2.3 2.2z"/></svg>
+        </button>
+        <button id="open-settings" class="icon-button" aria-label="设置">
+          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <main id="chat">
+      <button id="earlier" class="text-button" hidden>查看更早的消息</button>
+      <div id="list"></div>
+      <div id="typing" class="msg assistant" hidden aria-label="对方正在输入"><i></i><i></i><i></i></div>
+    </main>
+
+    <div id="notice" hidden>
+      <span id="notice-text"></span>
+      <button id="notice-action" class="text-button strong" hidden></button>
+    </div>
+
+    <footer class="composer">
+      <textarea id="input" rows="1" placeholder="发消息" enterkeyhint="send" autocomplete="off"></textarea>
+      <button id="send" disabled>发送</button>
+    </footer>
+  </div>
+
+  <section id="call" class="page" hidden>
+    <div class="call-top">
+      <div id="call-avatar" class="avatar"></div>
+      <div id="call-name" class="call-name"></div>
+      <div class="hint"><span id="call-clock"></span> <span id="call-status"></span></div>
+    </div>
+
+    <main id="call-log"></main>
+
+    <footer class="call-controls">
+      <button id="call-mic" class="call-button">
+        <i><svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/></svg></i>
+        <span>麦克风已开</span>
+      </button>
+      <button id="call-end" class="call-button hang">
+        <i><svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path transform="rotate(135 12 12)" d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.2.2 2.4.6 3.6.1.3 0 .7-.2 1l-2.3 2.2z"/></svg></i>
+        <span>挂断</span>
+      </button>
+      <button id="call-sound" class="call-button">
+        <i><svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg></i>
+        <span>扬声器已开</span>
+      </button>
+    </footer>
+  </section>
+
+  <section id="memory" class="page" hidden>
+    <header class="bar">
+      <button id="close-memory" class="text-button">返回</button>
+      <div class="title"><span>他记得的事</span></div>
+      <span class="bar-spacer"></span>
+    </header>
+
+    <div class="page-body">
+      <p id="memory-status" class="hint"></p>
+      <div class="row">
+        <button id="memory-run" class="plain-button">现在整理</button>
+        <span id="memory-run-result" class="hint"></span>
+      </div>
+
+      <h2>让他记住一件事</h2>
+      <div class="row">
+        <input id="pin-text" type="text" placeholder="比如:我周三下午都有课" autocomplete="off">
+        <button id="pin-add" class="plain-button">记住</button>
+      </div>
+      <p class="hint">你亲口交代的,他整理记忆时不会改也不会删。</p>
+
+      <div id="memory-content"></div>
+    </div>
+  </section>
+
+  <section id="settings" class="page" hidden>
+    <header class="bar">
+      <button id="close-settings" class="text-button">返回</button>
+      <div class="title"><span>设置</span></div>
+      <button id="save-settings" class="text-button strong">保存</button>
+    </header>
+
+    <div class="page-body">
+      <h2>线路</h2>
+      <p class="hint">一条线路是一家 AI 加一个 Key。可以接好几条,再在下面选什么时候用哪条。聊天记录和记忆是共用的,换线路他照样记得。</p>
+      <div id="lines"></div>
+      <div class="row">
+        <button id="add-line" class="plain-button">再加一条线路</button>
+      </div>
+      <p class="hint">Key 只存在这台设备上,聊天时直接发给那家 AI,不经过别的服务器。</p>
+
+      <h2>什么时候用哪条</h2>
+      <label>日常聊天
+        <select id="route-chat"></select>
+      </label>
+      <label>深夜聊天
+        <select id="route-night"></select>
+      </label>
+      <div class="row">
+        <span class="hint">深夜是从</span>
+        <input id="night-from" type="time" aria-label="深夜开始时间">
+        <span class="hint">到</span>
+        <input id="night-to" type="time" aria-label="深夜结束时间">
+      </div>
+      <label>整理记忆
+        <select id="route-memory"></select>
+      </label>
+
+      <h2>语音和电话</h2>
+      <p class="hint">打电话时他说英文,字幕是英文加中文。你说中文英文都行。</p>
+      <label>他的声音用哪家
+        <select id="voice-provider">
+          <option value="minimax">MiniMax(国内能用,自然)</option>
+          <option value="elevenlabs">ElevenLabs(国外,国内连不上)</option>
+          <option value="siliconflow">硅基流动(英文口音重)</option>
+        </select>
+      </label>
+
+      <div id="voice-minimax">
+        <label>MiniMax 的 Key
+          <input id="minimax-key" type="password" autocomplete="off" autocapitalize="off" spellcheck="false">
+        </label>
+        <label>他的声音
+          <select id="minimax-voice"></select>
+        </label>
+        <p id="minimax-note" class="hint">填了 Key 之后,这里会列出能用的声音,英文的排在前面。</p>
+        <label>模型
+          <select id="minimax-model"></select>
+        </label>
+      </div>
+
+      <div id="voice-eleven">
+        <label>ElevenLabs 的 Key
+          <input id="eleven-key" type="password" autocomplete="off" autocapitalize="off" spellcheck="false">
+        </label>
+        <label>他的声音
+          <select id="eleven-voice"></select>
+        </label>
+        <div class="row">
+          <button id="eleven-sample" class="plain-button">听这个声音的样本</button>
+          <span class="hint">不花钱,不用 Key</span>
+        </div>
+        <label>模型
+          <select id="eleven-model"></select>
+        </label>
+      </div>
+
+      <div id="voice-silicon">
+        <label>他的声音
+          <select id="voice-voice"></select>
+        </label>
+      </div>
+
+      <div class="row">
+        <button id="voice-test" class="plain-button">用他的声音念一句</button>
+        <span id="voice-result" class="hint"></span>
+      </div>
+
+      <label>硅基流动的 Key(听写你说的话要用)
+        <input id="voice-key" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="留空就用上面硅基流动线路的 Key">
+      </label>
+      <label>打电话时用哪条线路想词
+        <select id="route-call"></select>
+      </label>
+
+      <!-- 一条线路的表单。app.js 里每条线路复制一份这个 -->
+      <template id="line-template">
+        <div class="line-card">
+          <div class="row">
+            <select class="line-preset" aria-label="选一家"></select>
+            <button class="plain-button small danger line-remove">删掉这条</button>
+          </div>
+          <label>给这条线路起个名
+            <input class="line-label" type="text" autocomplete="off">
+          </label>
+          <label>接口地址
+            <input class="line-base" type="url" inputmode="url" autocapitalize="off" spellcheck="false">
+          </label>
+          <label>API Key
+            <input class="line-key" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="sk-…">
+          </label>
+          <label>模型名
+            <input class="line-model" type="text" autocapitalize="off" spellcheck="false">
+          </label>
+          <div class="row line-models"></div>
+          <div class="row">
+            <button class="plain-button line-test">测试连接</button>
+            <span class="hint line-result"></span>
+          </div>
+        </div>
+      </template>
+
+      <h2>他是谁</h2>
+      <label>名字
+        <input id="his-name" type="text" autocomplete="off" placeholder="留空的话,第一次聊天时他自己起">
+      </label>
+      <label>人设
+        <textarea id="persona" rows="12" spellcheck="false"></textarea>
+      </label>
+      <div class="row">
+        <button id="reset-persona" class="plain-button">恢复默认人设</button>
+      </div>
+
+      <h2>数据</h2>
+      <p class="hint">聊天记录和记忆只存在这台设备的浏览器里。清除浏览器数据或删掉这个 app 会全部丢失,请定期导出备份。备份里不含 API Key。</p>
+      <div class="row">
+        <button id="export" class="plain-button">导出备份</button>
+        <button id="import" class="plain-button">导入备份</button>
+        <input id="import-file" type="file" accept="application/json,.json" hidden>
+      </div>
+      <div class="row">
+        <button id="clear" class="plain-button danger">清空聊天和记忆</button>
+      </div>
+      <p id="storage-info" class="hint"></p>
+    </div>
+  </section>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

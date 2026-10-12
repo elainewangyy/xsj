@@ -1,0 +1,286 @@
+/* 颜色都在这里改。上面是浅色,下面是深色,跟着手机的深色模式自动切换 */
+:root {
+  --backdrop: #e4e1dc;
+  --bg: #f3f1ee;
+  --surface: #ffffff;
+  --text: #1c1c1e;
+  --muted: #8a8a8e;
+  --line: #e0dcd6;
+  --mine: #5b7cfa;
+  --mine-text: #ffffff;
+  --theirs: #ffffff;
+  --theirs-text: #1c1c1e;
+  --accent: #4a6cf0;
+  --danger: #d6453d;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --backdrop: #0c0c0d;
+    --bg: #151517;
+    --surface: #1f1f22;
+    --text: #f2f2f3;
+    --muted: #8e8e93;
+    --line: #2c2c30;
+    --mine: #4f6ff0;
+    --theirs: #2a2a2e;
+    --theirs-text: #f2f2f3;
+    --accent: #8aa2ff;
+    --danger: #ff6b61;
+  }
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+
+html, body { height: 100%; margin: 0; }
+
+body {
+  display: flex;
+  justify-content: center;
+  background: var(--backdrop);
+  color: var(--text);
+  font: 16px/1.45 -apple-system, BlinkMacSystemFont, "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei", sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+
+/* 手机上占满屏幕,电脑上是中间一条手机宽度的栏 */
+#app, .page {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 520px;
+  height: 100dvh;
+  background: var(--bg);
+}
+
+/* 设置页、记忆页:盖在聊天页上面的整页 */
+.page {
+  position: fixed;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+}
+
+/* 顶栏 */
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 52px;
+  padding: env(safe-area-inset-top) 8px 0;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+.bar .title { flex: 1; text-align: center; font-weight: 600; font-size: 17px; }
+/* 标题两边一样宽,标题才在正中间 */
+.bar > button, .bar-spacer { min-width: 52px; }
+.bar-side { display: flex; flex: 0 0 92px; }
+.bar-side.end { justify-content: flex-end; }
+
+.icon-button {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  background: none;
+  border: 0;
+  border-radius: 50%;
+  fill: var(--text);
+}
+.text-button { min-height: 44px; padding: 0 10px; background: none; border: 0; color: var(--accent); }
+.text-button.strong { font-weight: 600; }
+
+/* 聊天区 */
+#chat {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 12px 16px;
+  -webkit-overflow-scrolling: touch;
+}
+#earlier { align-self: center; font-size: 14px; }
+#list { display: flex; flex-direction: column; gap: 6px; }
+
+.time { align-self: center; margin: 10px 0 2px; font-size: 12px; color: var(--muted); }
+
+.msg {
+  max-width: 78%;
+  padding: 9px 13px;
+  border-radius: 18px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.msg.user {
+  align-self: flex-end;
+  background: var(--mine);
+  color: var(--mine-text);
+  border-bottom-right-radius: 6px;
+}
+.msg.assistant {
+  align-self: flex-start;
+  background: var(--theirs);
+  color: var(--theirs-text);
+  border-bottom-left-radius: 6px;
+}
+
+/* 电话里的气泡:上面原话,下面一条细线和中文 */
+.msg-zh { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); font-size: 14px; opacity: 0.85; }
+
+/* 通话页 */
+.call-top { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: calc(28px + env(safe-area-inset-top)) 16px 12px; }
+.avatar {
+  width: 84px;
+  height: 84px;
+  display: grid;
+  place-items: center;
+  border-radius: 22px;
+  background: linear-gradient(135deg, #6f8dff, #b08cff);
+  color: #fff;
+  font-size: 36px;
+  font-weight: 600;
+}
+.call-name { font-size: 20px; font-weight: 600; }
+.call-top .hint { margin: 0; min-height: 20px; text-align: center; }
+#call-log { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 8px 12px 16px; }
+.call-controls { display: flex; justify-content: space-evenly; padding: 12px 12px calc(20px + env(safe-area-inset-bottom)); }
+.call-button { display: flex; flex-direction: column; align-items: center; gap: 8px; width: 92px; background: none; border: 0; font-size: 12px; color: var(--muted); }
+.call-button i { width: 60px; height: 60px; display: grid; place-items: center; border-radius: 50%; background: var(--surface); fill: var(--text); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12); }
+.call-button.off i { opacity: 0.45; }
+.call-button.hang i { background: #f0554d; fill: #fff; }
+
+/* "对方正在输入"的三个点 */
+#typing { display: flex; gap: 4px; margin-top: 6px; padding: 14px 13px; }
+#typing i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--muted);
+  animation: blink 1.2s infinite both;
+}
+#typing i:nth-child(2) { animation-delay: 0.2s; }
+#typing i:nth-child(3) { animation-delay: 0.4s; }
+@keyframes blink {
+  0%, 80%, 100% { opacity: 0.3; }
+  40% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #typing i { animation: none; }
+}
+
+/* 输入框上方的提示条 */
+#notice {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 4px 12px;
+  font-size: 14px;
+  color: var(--muted);
+  text-align: center;
+  border-top: 1px solid var(--line);
+}
+
+/* 输入栏 */
+.composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+  background: var(--bg);
+  border-top: 1px solid var(--line);
+}
+#input {
+  flex: 1;
+  min-height: 40px;
+  max-height: 132px;
+  padding: 8px 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  resize: none;
+  outline: none;
+}
+#input:focus { border-color: var(--accent); }
+#send {
+  height: 40px;
+  padding: 0 16px;
+  background: var(--mine);
+  color: var(--mine-text);
+  border: 0;
+  border-radius: 20px;
+  font-weight: 600;
+}
+#send:disabled { opacity: 0.4; cursor: default; }
+
+/* 设置页和记忆页的内容区 */
+.page-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px calc(32px + env(safe-area-inset-bottom));
+}
+.page-body h2 { margin: 24px 0 10px; font-size: 14px; font-weight: 600; color: var(--muted); }
+.page-body label { display: block; margin-bottom: 12px; font-size: 14px; color: var(--muted); }
+.page-body input:not([type="file"]),
+.page-body select,
+.page-body textarea {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 10px 12px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  outline: none;
+}
+.page-body textarea { resize: vertical; line-height: 1.5; }
+.page-body input:focus,
+.page-body select:focus,
+.page-body textarea:focus { border-color: var(--accent); }
+.row > input { flex: 1; min-width: 0; margin-top: 0 !important; }
+
+/* 记忆页里的一条条记忆 */
+.memory-list { margin: 0 0 12px; padding: 0; list-style: none; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+.memory-list li { display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px; }
+.memory-list li + li { border-top: 1px solid var(--line); }
+.memory-list span { flex: 1; overflow-wrap: anywhere; }
+.memory-list small { display: block; color: var(--muted); }
+.memory-list button {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  margin: -3px -6px -3px 0;
+  background: none;
+  border: 0;
+  border-radius: 50%;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 12px; }
+.plain-button {
+  min-height: 40px;
+  padding: 0 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.plain-button.danger { color: var(--danger); }
+.plain-button.small { min-height: 32px; padding: 0 10px; font-size: 13px; }
+
+/* 设置页里的一条线路 */
+.line-card { margin-bottom: 12px; padding: 12px 12px 0; border: 1px solid var(--line); border-radius: 12px; }
+.line-card .line-preset { flex: 1; width: auto; margin-top: 0; }
+.line-models { margin-top: -4px; max-height: 120px; overflow-y: auto; }
+.row > input[type="time"] { flex: none; width: auto; }
+.hint { margin: 0 0 12px; font-size: 13px; color: var(--muted); }
+.row .hint { margin: 0; }
