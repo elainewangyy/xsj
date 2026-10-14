@@ -697,7 +697,14 @@ async function init() {
 
   // 装到主屏幕后断网也能打开。在电脑上本地调试时不启用,免得改了代码看不到
   const local = ['localhost', '127.0.0.1'].includes(location.hostname);
-  if ('serviceWorker' in navigator && !local) navigator.serviceWorker.register('sw.js');
+  if ('serviceWorker' in navigator && !local) {
+    // 已经装过旧版的话,新版下载好之后页面会自动刷新一次换成新版。第一次安装不刷新
+    const hadVersion = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (hadVersion) location.reload();
+    });
+    navigator.serviceWorker.register('sw.js').then((registration) => registration.update());
+  }
 }
 
 init();
