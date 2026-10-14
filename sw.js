@@ -13,6 +13,7 @@ const FILES = [
   'call.js',
   'memory.js',
   'mic-worklet.js',
+  'realtime.js',
   'store.js',
   'voice.js',
   'character.txt',

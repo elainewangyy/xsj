@@ -1,6 +1,9 @@
 // 打电话:通话页面,和"他说 -> 你说 -> 他说"的循环
-// 这是对讲式的通话:你说完停一下,他才开始想、开始说,不能中途打断他
+// 大多数声音是对讲式的:你说完停一下,他才开始想、开始说,不能中途打断他
+// 选 Grok 时换成真正的实时通话(realtime.js),可以随时打断
 import * as brain from './brain.js';
+import { putMessage } from './store.js';
+import { GrokCall } from './realtime.js';
 import {
   voiceConfig,
   checkVoice,
@@ -43,8 +46,10 @@ function setStatus(text) {
 }
 
 function showBubble(role, content, zh) {
-  $('call-log').append(bubbleNode(role, content, zh));
+  const bubble = bubbleNode(role, content, zh);
+  $('call-log').append(bubble);
   $('call-log').scrollTop = $('call-log').scrollHeight;
+  return bubble;
 }
 
 function showName(name) {
@@ -60,6 +65,7 @@ function showToggle(id, on, label) {
 // 把麦克风、声音、计时都关掉。可以重复调用
 function cleanup(state) {
   clearInterval(state.timer);
+  if (state.grok) state.grok.stop();
   if (state.listener) state.listener.cancel();
   if (state.player) state.player.stop();
   if (state.stream) state.stream.getTracks().forEach((track) => track.stop());
@@ -92,19 +98,72 @@ export async function startCall(host) {
     }
     state.context = new AudioContext();
     state.context.resume();
+    const startClock = () => {
+      state.startedAt = Date.now();
+      state.timer = setInterval(() => ($('call-clock').textContent = clock(Date.now() - state.startedAt)), 1000);
+    };
+
+    if (config.provider === 'grok') {
+      await startGrok(state, config);
+      if (!state.active) return cleanup(state); // 还没接通你就挂了
+      startClock();
+      return;
+    }
+
     state.player = new Player(state.context);
     state.listener = new Listener(state.context, state.stream);
     await state.listener.start();
     if (!state.active) return cleanup(state); // 还没接通你就挂了
 
-    state.startedAt = Date.now();
-    state.timer = setInterval(() => ($('call-clock').textContent = clock(Date.now() - state.startedAt)), 1000);
+    startClock();
     await converse(state, config);
   } catch (err) {
     // 出错了就停在通话页上把原因显示出来,等你自己点挂断
     cleanup(state);
     if (state.active) setStatus(err.message);
   }
+}
+
+// Grok 实时通话。你说的和他说的都会进聊天记录;他说的英文另外翻成中文做字幕
+async function startGrok(state, config) {
+  const { host } = state;
+  const setup = await brain.realtimeSetup(host.messages);
+  host.setName(setup.name);
+  showName(setup.name);
+
+  state.grok = new GrokCall({
+    apiKey: config.grok.apiKey,
+    voice: config.grok.voice,
+    instructions: setup.instructions,
+    opening: setup.opening,
+    context: state.context,
+    stream: state.stream,
+    events: {
+      status: setStatus,
+      heard: async (text) => {
+        showBubble('user', text);
+        await host.addMessage('user', text, { call: true });
+        // 你说了安全词:他立刻停下,换回不带深夜设定的说明
+        if (await brain.noteSafeword(host.messages)) {
+          const fresh = await brain.realtimeSetup(host.messages);
+          state.grok.redirect(fresh.instructions, '(ta 刚刚说了安全词。立刻停下,温柔地确认 ta 还好吗。)');
+        }
+      },
+      said: async (text) => {
+        const bubble = showBubble('assistant', text);
+        const msg = await host.addMessage('assistant', text, { call: true });
+        // 翻译慢一点没关系,先显示英文,中文到了再补上
+        try {
+          const zh = (await brain.translate(text)).trim();
+          bubble.append(bubbleNode('assistant', '', zh).lastChild);
+          msg.zh = zh;
+          await putMessage(msg);
+        } catch {}
+      },
+      failed: (text) => setStatus(text),
+    },
+  });
+  await state.grok.start();
 }
 
 async function converse(state, config) {
@@ -184,6 +243,7 @@ $('call-mic').addEventListener('click', () => {
   if (!call) return;
   call.micOn = !call.micOn;
   if (call.listener) call.listener.paused = !call.micOn;
+  if (call.grok) call.grok.micOn = call.micOn;
   showToggle('call-mic', call.micOn, '麦克风');
   if (/在听你说|麦克风关着/.test($('call-status').textContent)) {
     setStatus(call.micOn ? '在听你说…' : '麦克风关着,他听不到你');
@@ -191,8 +251,9 @@ $('call-mic').addEventListener('click', () => {
 });
 
 $('call-sound').addEventListener('click', () => {
-  if (!call || !call.player) return;
+  const speaker = call && (call.grok || call.player);
+  if (!speaker) return;
   const on = $('call-sound').classList.contains('off');
-  call.player.muted = !on;
+  speaker.muted = !on;
   showToggle('call-sound', on, '扬声器');
 });

@@ -43,6 +43,9 @@ export async function addMessage(msg) {
   return { ...msg, id };
 }
 
+// 改一条已经存过的消息,比如给电话里那句话补上中文翻译
+export const putMessage = async (msg) => done((await open('messages', 'readwrite')).put(msg));
+
 export const allMessages = async () => done((await open('messages', 'readonly')).getAll());
 
 export const clearMessages = async () => done((await open('messages', 'readwrite')).clear());

@@ -128,6 +128,13 @@
         <span class="hint">到</span>
         <input id="night-to" type="time" aria-label="深夜结束时间">
       </div>
+      <label>深夜补充设定
+        <textarea id="night-prompt" rows="6" spellcheck="false" placeholder="深夜时段额外加给他的设定,打字和打电话都会用上。留空就不加。"></textarea>
+      </label>
+      <label>安全词
+        <input id="safeword" type="text" autocomplete="off">
+      </label>
+      <p class="hint">不管在聊什么,你说出或打出安全词,他会立刻停下、正常地问你怎么样,接下来 6 小时不再用深夜补充设定。这些只存在这台设备上,不会传到网上。</p>
       <label>整理记忆
         <select id="route-memory"></select>
       </label>
@@ -136,11 +143,22 @@
       <p class="hint">打电话时他说英文,字幕是英文加中文。你说中文英文都行。</p>
       <label>他的声音用哪家
         <select id="voice-provider">
+          <option value="grok">Grok 实时通话(能打断他,国内大概率连不上)</option>
           <option value="minimax">MiniMax(国内能用,自然)</option>
           <option value="elevenlabs">ElevenLabs(国外,国内连不上)</option>
           <option value="siliconflow">硅基流动(英文口音重)</option>
         </select>
       </label>
+
+      <div id="voice-grok">
+        <p class="hint">真正的实时通话:你随时可以开口打断他,不用等他说完。建议戴耳机。中文字幕用"日常聊天"那条线路翻译。</p>
+        <label>Grok 的 Key
+          <input id="grok-key" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="留空就用上面 Grok 线路的 Key">
+        </label>
+        <label>他的声音
+          <select id="grok-voice"></select>
+        </label>
+      </div>
 
       <div id="voice-minimax">
         <label>MiniMax 的 Key
@@ -182,12 +200,15 @@
         <span id="voice-result" class="hint"></span>
       </div>
 
-      <label>硅基流动的 Key(听写你说的话要用)
-        <input id="voice-key" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="留空就用上面硅基流动线路的 Key">
-      </label>
-      <label>打电话时用哪条线路想词
-        <select id="route-call"></select>
-      </label>
+      <!-- 对讲式通话才需要这两项;Grok 自己听、自己想 -->
+      <div id="voice-relay">
+        <label>硅基流动的 Key(听写你说的话要用)
+          <input id="voice-key" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="留空就用上面硅基流动线路的 Key">
+        </label>
+        <label>打电话时用哪条线路想词
+          <select id="route-call"></select>
+        </label>
+      </div>
 
       <!-- 一条线路的表单。app.js 里每条线路复制一份这个 -->
       <template id="line-template">

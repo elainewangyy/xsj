@@ -4,6 +4,21 @@ import { loadSettings } from './brain.js';
 
 const MINIMAX = 'https://api.minimax.cn/v1';
 const ELEVEN = 'https://api.elevenlabs.io/v1';
+export const GROK = 'https://api.x.ai/v1';
+
+// Grok 的声音列表要有 Key 才拿得到。拿不到时先给这几个常见的
+const GROK_FALLBACK = ['eve', 'ara', 'rex', 'sal', 'leo'].map((id) => ({ id, name: id }));
+
+export async function grokVoices(apiKey) {
+  if (!apiKey) return GROK_FALLBACK;
+  try {
+    const res = await fetch(`${GROK}/tts/voices`, { headers: { authorization: `Bearer ${apiKey}` } });
+    const { voices } = await res.json();
+    return voices.map((voice) => ({ id: voice.voice_id, name: voice.name || voice.voice_id }));
+  } catch {
+    return GROK_FALLBACK;
+  }
+}
 
 // MiniMax 的几个模型。2.8 能念出笑声、叹气这类语气声
 export const MINIMAX_MODELS = [
@@ -79,16 +94,20 @@ export const VOICES = [
 // 现在生效的语音配置。没单独填语音的 Key,就借用线路里同一家的 Key
 export async function voiceConfig() {
   const settings = await loadSettings();
-  const config = { ...settings.voice };
-  if (!config.apiKey) {
-    const sameProvider = settings.lines.find((line) => line.apiBaseUrl === config.apiBaseUrl && line.apiKey);
-    if (sameProvider) config.apiKey = sameProvider.apiKey;
-  }
+  const config = { ...settings.voice, grok: { ...settings.voice.grok } };
+  const keyOf = (base) => (settings.lines.find((line) => line.apiBaseUrl === base && line.apiKey) || {}).apiKey || '';
+  if (!config.apiKey) config.apiKey = keyOf(config.apiBaseUrl);
+  if (!config.grok.apiKey) config.grok.apiKey = keyOf(GROK);
   return config;
 }
 
 // 打电话前检查该填的有没有填,缺什么就说清楚
 export function checkVoice(config) {
+  if (config.provider === 'grok') {
+    // Grok 自己听、自己想、自己说,只要它的 Key
+    if (!config.grok.apiKey) throw new Error('还没填 Grok 的 Key。在设置里加一条 Grok 线路,或者在"语音和电话"里填');
+    return;
+  }
   if (!config.apiKey) throw new Error('还没填硅基流动的 Key(听写你说的话要用)。去设置里的"语音和电话"填上');
   const chosen = { minimax: ['MiniMax', config.minimax], elevenlabs: ['ElevenLabs', config.eleven] }[config.provider];
   if (!chosen) return;
@@ -157,6 +176,16 @@ export async function synthesize(config, spoken) {
     const bytes = new Uint8Array(hex.length / 2);
     for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
     return bytes.buffer;
+  }
+
+  if (config.provider === 'grok') {
+    if (!config.grok.apiKey) throw new Error('还没填 Grok 的 Key');
+    const res = await request(`${GROK}/tts`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${config.grok.apiKey}` },
+      body: JSON.stringify({ text, voice_id: config.grok.voice, language: 'en' }),
+    });
+    return res.arrayBuffer();
   }
 
   if (config.provider === 'elevenlabs') {
@@ -329,6 +358,27 @@ export class Listener {
   }
 }
 
+// 降采样:把麦克风的声音(一般是 48000Hz)换成接口要的采样率。原来的几个采样点取平均,合成一个
+export function resample(input, fromRate, toRate) {
+  const ratio = fromRate / toRate;
+  const output = new Float32Array(Math.floor(input.length / ratio));
+  for (let i = 0; i < output.length; i++) {
+    const from = Math.floor(i * ratio);
+    const to = Math.min(input.length, Math.max(from + 1, Math.floor((i + 1) * ratio)));
+    let sum = 0;
+    for (let j = from; j < to; j++) sum += input[j];
+    output[i] = sum / (to - from);
+  }
+  return output;
+}
+
+// 浮点声音 -> 16 位整数声音,接口一般收这种
+export function toPcm16(samples) {
+  const pcm = new Int16Array(samples.length);
+  for (let i = 0; i < samples.length; i++) pcm[i] = Math.max(-1, Math.min(1, samples[i])) * 0x7fff;
+  return pcm;
+}
+
 // 把收到的声音打包成 16000Hz 单声道的 WAV 文件,听写接口都认这个格式
 export function encodeWav(chunks, fromRate) {
   const RATE = 16000;
@@ -340,8 +390,8 @@ export function encodeWav(chunks, fromRate) {
     offset += chunk.length;
   }
 
-  const ratio = fromRate / RATE;
-  const samples = Math.floor(length / ratio);
+  const pcm = toPcm16(resample(input, fromRate, RATE));
+  const samples = pcm.length;
   const view = new DataView(new ArrayBuffer(44 + samples * 2));
   const text = (at, value) => [...value].forEach((char, i) => view.setUint8(at + i, char.charCodeAt(0)));
   text(0, 'RIFF');
@@ -358,14 +408,6 @@ export function encodeWav(chunks, fromRate) {
   text(36, 'data');
   view.setUint32(40, samples * 2, true);
 
-  for (let i = 0; i < samples; i++) {
-    // 降采样:原来的几个采样点取平均,合成一个
-    const from = Math.floor(i * ratio);
-    const to = Math.min(length, Math.max(from + 1, Math.floor((i + 1) * ratio)));
-    let sum = 0;
-    for (let j = from; j < to; j++) sum += input[j];
-    const sample = Math.max(-1, Math.min(1, sum / (to - from)));
-    view.setInt16(44 + i * 2, sample * 0x7fff, true);
-  }
+  for (let i = 0; i < samples; i++) view.setInt16(44 + i * 2, pcm[i], true);
   return new Blob([view], { type: 'audio/wav' });
 }

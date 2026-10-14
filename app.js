@@ -3,7 +3,17 @@ import * as store from './store.js';
 import * as brain from './brain.js';
 import { CARDS, loadMemory, saveMemory, pin, forget, activeStates, stamp, spoken } from './memory.js';
 import { startCall, inCall, bubbleNode } from './call.js';
-import { VOICES, MINIMAX_MODELS, ELEVEN_MODELS, minimaxVoices, elevenVoices, synthesize, Player } from './voice.js';
+import {
+  GROK,
+  VOICES,
+  MINIMAX_MODELS,
+  ELEVEN_MODELS,
+  grokVoices,
+  minimaxVoices,
+  elevenVoices,
+  synthesize,
+  Player,
+} from './voice.js';
 
 const $ = (id) => document.getElementById(id);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -67,6 +77,7 @@ async function addMessage(role, content, extra = {}) {
   $('list').append(...messageNodes(msg, messages[messages.length - 1]));
   messages.push(msg);
   scrollToBottom();
+  return msg;
 }
 
 function setTyping(on) {
@@ -231,7 +242,7 @@ async function renderMemoryPage() {
   if (!nodes.length) {
     const empty = document.createElement('p');
     empty.className = 'hint';
-    empty.textContent = '他还没攒下记忆。聊一会儿,停十来分钟,他会自己整理;也可以点上面的"现在整理"。';
+    empty.textContent = '他还没攒下记忆。每攒够 30 条聊天记录,他会自己整理一次;也可以点上面的"现在整理"。';
     nodes.push(empty);
   }
   $('memory-content').replaceChildren(...nodes);
@@ -365,6 +376,8 @@ async function openSettings() {
   fillRoutes(settings.routes);
   $('night-from').value = settings.nightFrom;
   $('night-to').value = settings.nightTo;
+  $('night-prompt').value = settings.nightPrompt;
+  $('safeword').value = settings.safeword;
 
   const { voice } = settings;
   $('voice-provider').value = voice.provider;
@@ -378,8 +391,10 @@ async function openSettings() {
   $('eleven-key').value = voice.eleven.apiKey;
   $('eleven-model').replaceChildren(...modelOptions(ELEVEN_MODELS));
   $('eleven-model').value = voice.eleven.model;
+  $('grok-key').value = voice.grok.apiKey;
   $('voice-result').textContent = '';
   showVoiceProvider();
+  loadGrokVoices(voice.grok.voice);
   loadMinimaxVoices(voice.minimax.voiceId);
   loadElevenVoices(voice.eleven.voiceId);
 
@@ -402,6 +417,8 @@ async function saveSettings() {
     },
     nightFrom: $('night-from').value || settings.nightFrom,
     nightTo: $('night-to').value || settings.nightTo,
+    nightPrompt: $('night-prompt').value,
+    safeword: $('safeword').value.trim(),
     voice: readVoice(settings.voice),
   });
   await brain.savePersona($('persona').value);
@@ -418,9 +435,22 @@ async function saveSettings() {
 // 选了哪家,就只显示哪家要填的东西
 function showVoiceProvider() {
   const provider = $('voice-provider').value;
+  $('voice-grok').hidden = provider !== 'grok';
   $('voice-minimax').hidden = provider !== 'minimax';
   $('voice-eleven').hidden = provider !== 'elevenlabs';
   $('voice-silicon').hidden = provider !== 'siliconflow';
+  $('voice-relay').hidden = provider === 'grok';
+}
+
+// Grok 的 Key:这里没填就用设置页里那条 Grok 线路的
+const grokKey = () =>
+  $('grok-key').value.trim() || (readLines().find((line) => line.apiBaseUrl === GROK && line.apiKey) || {}).apiKey || '';
+
+async function loadGrokVoices(selected) {
+  const voices = await grokVoices(grokKey());
+  if (selected && !voices.some((v) => v.id === selected)) voices.unshift({ id: selected, name: selected });
+  $('grok-voice').replaceChildren(...voices.map((v) => new Option(v.name === v.id ? v.id : `${v.name} · ${v.id}`, v.id)));
+  if (selected) $('grok-voice').value = selected;
 }
 
 let minimaxList = []; // MiniMax 的声音列表,填了 Key 才拿得到
@@ -468,6 +498,7 @@ function readVoice(saved) {
     provider: $('voice-provider').value,
     apiKey: $('voice-key').value.trim(),
     voice: $('voice-voice').value,
+    grok: { apiKey: $('grok-key').value.trim(), voice: $('grok-voice').value },
     minimax: {
       apiKey: $('minimax-key').value.trim(),
       voiceId: $('minimax-voice').value,
@@ -489,6 +520,7 @@ async function testVoice() {
     // 没单独填硅基流动的 Key 时,借用设置页里那条硅基流动线路的
     const sameProvider = readLines().find((line) => line.apiBaseUrl === config.apiBaseUrl && line.apiKey);
     if (!config.apiKey && sameProvider) config.apiKey = sameProvider.apiKey;
+    config.grok.apiKey = grokKey();
 
     const context = new AudioContext();
     context.resume();
@@ -513,6 +545,7 @@ async function exportBackup() {
     if (voice) delete voice.apiKey;
     if (voice && voice.eleven) delete voice.eleven.apiKey;
     if (voice && voice.minimax) delete voice.minimax.apiKey;
+    if (voice && voice.grok) delete voice.grok.apiKey;
   }
   const day = new Date().toLocaleDateString('sv-SE');
   const file = new File([JSON.stringify(data)], `小手机备份-${day}.json`, { type: 'application/json' });
@@ -557,6 +590,7 @@ async function importBackup(file) {
   settings.voice.apiKey = before.voice.apiKey;
   settings.voice.eleven.apiKey = before.voice.eleven.apiKey;
   settings.voice.minimax.apiKey = before.voice.minimax.apiKey;
+  settings.voice.grok.apiKey = before.voice.grok.apiKey;
   await brain.saveSettings(settings);
   location.reload();
 }
@@ -608,11 +642,17 @@ $('open-call').addEventListener('click', () => {
     name: $('name').textContent,
     addMessage,
     setName: (name) => ($('name').textContent = name),
-    ended: maintainQuietly,
+    // 挂断后重画一遍聊天页:电话里那几句的中文翻译是后来才补上的
+    ended: () => {
+      render();
+      scrollToBottom();
+      maintainQuietly();
+    },
   });
 });
 $('voice-test').addEventListener('click', testVoice);
 $('voice-provider').addEventListener('change', showVoiceProvider);
+$('grok-key').addEventListener('change', () => loadGrokVoices($('grok-voice').value));
 $('minimax-key').addEventListener('change', () => loadMinimaxVoices($('minimax-voice').value));
 $('minimax-voice').addEventListener('change', showMinimaxNote);
 $('eleven-key').addEventListener('change', () => loadElevenVoices($('eleven-voice').value));

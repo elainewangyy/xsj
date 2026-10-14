@@ -41,10 +41,14 @@ const DEFAULT_SETTINGS = {
   routes: { chat: '', night: '', memory: '', call: '' },
   nightFrom: '23:00',
   nightTo: '05:00',
+  nightPrompt: '', // 深夜时段额外加给他的设定,你自己在设置里填。打字和打电话都会用上
+  safeword: '红灯', // 你说出这个词,他立刻停下,接下来一段时间不再用深夜设定
   temperature: 1.1,
   // 语音。听写你说的话(asr)固定用硅基流动;他的声音(tts)由 provider 决定用哪家
   voice: {
-    provider: 'minimax', // 'minimax'、'elevenlabs' 或 'siliconflow'
+    provider: 'minimax', // 'grok'、'minimax'、'elevenlabs' 或 'siliconflow'
+    // Grok:真正的实时通话,能随时打断。apiKey 留空就借用 Grok 线路的 Key
+    grok: { apiKey: '', voice: 'eve' },
     // MiniMax:国内能用,声音自然
     minimax: { apiKey: '', voiceId: '', model: 'speech-2.8-hd' },
     // 硅基流动:apiKey 留空就借用线路里硅基流动那条的 Key
@@ -62,9 +66,8 @@ const DEFAULT_SETTINGS = {
 const CONTEXT_MESSAGES = 60; // 每次带给 AI 的最近消息条数(一条气泡算一条)
 
 // 记忆整理的节奏
-const IDLE_MS = 10 * 60 * 1000; // 聊天停下这么久之后,才把这段压成碎片
-const PENDING_MAX = 40; // 一直没停的话,攒到这么多条也压一次
-const BATCH_MAX = 80; // 一次最多压多少条,太多就分几次
+const EVERY = 30; // 每攒够这么多条聊天记录(一个气泡算一条),压成一段碎片
+const BATCH_MAX = 80; // 手动点"现在整理"时,一次最多压多少条,太多就分几次
 const NIGHTLY_HOUR = 4; // 每天几点之后,第一次打开时写前一天的小传、更新卡片
 const PAUSE_MS = 6 * 60 * 60 * 1000; // 连续失败三次后歇这么久再试,免得白烧钱
 
@@ -98,6 +101,7 @@ export async function loadSettings() {
     voice: {
       ...DEFAULT_SETTINGS.voice,
       ...saved.voice,
+      grok: { ...DEFAULT_SETTINGS.voice.grok, ...(saved.voice && saved.voice.grok) },
       minimax: { ...DEFAULT_SETTINGS.voice.minimax, ...(saved.voice && saved.voice.minimax) },
       eleven: { ...DEFAULT_SETTINGS.voice.eleven, ...(saved.voice && saved.voice.eleven) },
     },
@@ -161,17 +165,18 @@ export async function savePersona(text) {
 }
 
 function explain(status, body) {
-  if (status === 401) return 'API Key 不对';
-  if (status === 402) return '账户余额不足';
-  if (status === 404) return '接口地址或模型名不对';
-  if (status === 429) return '请求太频繁,等一会儿再试';
-  // 其他错误把对面给的原话显示出来,里面常常直接写了该怎么改
+  // 对面给的原话也一起显示,里面常常直接写了原因和该怎么改
   let detail = body;
   try {
     const parsed = JSON.parse(body);
-    detail = (parsed.error && parsed.error.message) || parsed.message || body;
+    detail = (parsed.error && (parsed.error.message || parsed.error)) || parsed.message || body;
   } catch {}
-  return `接口报错 ${status}:${detail.slice(0, 200)}`;
+  detail = String(detail).slice(0, 200);
+  if (status === 401) return `API Key 不对(${detail})`;
+  if (status === 402) return `账户余额不足(${detail})`;
+  if (status === 404) return `接口地址或模型名不对(${detail})`;
+  if (status === 429) return `请求太频繁或额度用完了,等一会儿再试(${detail})`;
+  return `接口报错 ${status}:${detail}`;
 }
 
 const endpoint = (line, path) => `${line.apiBaseUrl.replace(/\/$/, '')}/${path}`;
@@ -237,11 +242,21 @@ export async function listModels(line) {
 // 你的每一轮开头标上发送时间,他才知道隔了多久、现在多晚
 function toTurns(messages) {
   const turns = [];
+  let note = '';
   for (const m of messages) {
-    if (m.role !== 'user' && m.role !== 'assistant') continue; // "语音通话 3:20"这种记号不算对话
+    // "语音通话 03:20"这种记号不算对话,但要在你下一句话前告诉他:电话挂了,回到打字
+    // 不然他会以为还在电话里,接着用电话腔回你
+    if (m.role === 'note') {
+      note = m.content;
+      continue;
+    }
+    if (m.role !== 'user' && m.role !== 'assistant') continue;
+    let content = m.content;
+    if (m.role === 'user' && note) content = `(${note} 已经结束,现在回到打字聊天)${content}`;
+    if (m.role === 'user') note = '';
     const last = turns[turns.length - 1];
-    if (last && last.role === m.role) last.content += `\n${m.content}`;
-    else turns.push({ role: m.role, content: m.role === 'user' ? `[${stamp(m.t)}] ${m.content}` : m.content });
+    if (last && last.role === m.role) last.content += `\n${content}`;
+    else turns.push({ role: m.role, content: m.role === 'user' ? `[${stamp(m.t)}] ${content}` : content });
   }
   // 有的 AI 接口要求对话必须由你这边开头。如果最前面是他的话,垫一句
   if (turns.length && turns[0].role !== 'user') turns.unshift({ role: 'user', content: '(更早的对话略)' });
@@ -268,16 +283,52 @@ async function replyInCharacter(line, messages) {
   return null;
 }
 
-// 准备好一次回复要用的东西:他的名字(没有就现起)和系统提示词(人设 + 名字 + 这个场合的规则 + 记忆)
-async function prepare(line, rules) {
+// ---------- 深夜设定和安全词 ----------
+
+const SAFEWORD_PAUSE_MS = 6 * 60 * 60 * 1000; // 说了安全词之后,这么久之内不再用深夜设定
+
+// 你最近这一轮话里有没有说安全词
+async function saidSafeword(messages) {
+  const { safeword } = await loadSettings();
+  if (!safeword) return false;
+  const recent = [];
+  for (let i = messages.length - 1; i >= 0 && messages[i].role === 'user'; i--) recent.push(messages[i].content);
+  return recent.some((text) => text.toLowerCase().includes(safeword.toLowerCase()));
+}
+
+// 说了安全词:记下时间,深夜设定先停用
+export async function noteSafeword(messages) {
+  if (!(await saidSafeword(messages))) return false;
+  await store.set('nightPausedUntil', Date.now() + SAFEWORD_PAUSE_MS);
+  return true;
+}
+
+// 这一刻要额外加给他的深夜内容:到了深夜时段、你填了深夜设定、最近没说过安全词,才加
+async function nightSection(messages) {
+  const settings = await loadSettings();
+  const now = Date.now();
+  if (await noteSafeword(messages)) {
+    return `## 安全词
+ta 刚刚说了安全词"${settings.safeword}"。不管刚才在做什么,立刻完全停下,不再继续任何亲密或压制的内容,也不要追问原因。
+换回平常的你:语气放软,简单确认 ta 现在还好吗、需不需要什么。之后由 ta 决定聊什么。`;
+  }
+  const pausedUntil = (await store.get('nightPausedUntil')) || 0;
+  if (!settings.nightPrompt.trim() || !isNight(settings, now) || pausedUntil > now) return '';
+  return `## 深夜\n${settings.nightPrompt.trim()}\n\n不管在做什么,ta 说出"${settings.safeword}"就立刻停下。`;
+}
+
+// 准备好一次回复要用的东西:他的名字(没有就现起)和系统提示词
+// 人设 + 名字 + 这个场合的规则 + 深夜设定(到点才有)+ 记忆
+async function prepare(line, rules, messages) {
   const persona = await getPersona();
   let name = await store.get('name');
   if (!name) {
     name = await pickName(line, persona);
     await store.set('name', name);
   }
+  const night = await nightSection(messages);
   const remembered = renderMemory(await loadMemory(), Date.now());
-  const system = [persona, `你的名字是${name}。`, rules, remembered && `## 你记得的事\n${remembered}`]
+  const system = [persona, `你的名字是${name}。`, rules, night, remembered && `## 你记得的事\n${remembered}`]
     .filter(Boolean)
     .join('\n\n');
   return { name, system };
@@ -294,7 +345,7 @@ const linesOf = (raw) =>
 export async function reply(messages) {
   const line = await lineFor('chat');
   const { rules } = await loadDefaults();
-  const { name, system } = await prepare(line, rules);
+  const { name, system } = await prepare(line, rules, messages);
   const raw = await replyInCharacter(line, [
     { role: 'system', content: system },
     ...toTurns(messages.slice(-CONTEXT_MESSAGES)),
@@ -316,11 +367,46 @@ export function parseBilingual(raw) {
   return items.map((item) => (item.en ? item : { en: item.zh, zh: '' }));
 }
 
+// Grok 实时通话用的规则:他直接开口说,不需要"一行英文一行中文"的格式,中文翻译另外做
+const REALTIME_RULES = `## 现在是语音通话
+- 全程用英语说。要地道:像母语是英语的人平时打电话那样,用缩写和口语,句子短,不要书面语,不要把中文的说法直译过来。
+- ta 说中文或英文你都听得懂,你始终用英语回答。
+- 一次别说太久,说一两句就停下,给 ta 接话的空间。ta 打断你时就停下来听。
+- 不要描述动作,不要念标点和表情。`;
+
+// 准备 Grok 实时通话:系统提示词里放人设、规则、记忆和最近的聊天记录,让他接着平时的话头聊
+export async function realtimeSetup(messages) {
+  const line = await lineFor('chat');
+  const { name, system } = await prepare(line, REALTIME_RULES, messages);
+  const recent = spoken(messages)
+    .slice(-30)
+    .map((m) => `[${stamp(m.t)}] ${m.role === 'user' ? 'ta' : name}:${m.content}`)
+    .join('\n');
+  const now = new Date().toLocaleString('zh-CN', { dateStyle: 'full', timeStyle: 'short' });
+  const instructions = [system, recent && `## 最近的聊天记录\n${recent}`, `现在是 ${now}。`]
+    .filter(Boolean)
+    .join('\n\n');
+  return { name, instructions, opening: '(ta 给你打来了语音电话,你接了起来。先开口说第一句。)' };
+}
+
+// 把他在电话里说的一句英文翻成中文,给字幕用
+export async function translate(text) {
+  const line = await lineFor('chat');
+  return chat(
+    line,
+    [
+      { role: 'system', content: '把用户给的这句英文口语翻成自然的中文口语。只输出译文,不要解释。' },
+      { role: 'user', content: text },
+    ],
+    { temperature: 0.3 },
+  );
+}
+
 // 打电话:生成他接下来要说的几句话,每句带英文和中文
 // opening 表示电话刚接通,他先开口;sounds 表示现在用的声音能念出笑声叹气
 export async function callReply(messages, { opening = false, sounds = false } = {}) {
   const line = await lineFor('call');
-  const { name, system } = await prepare(line, sounds ? `${CALL_RULES}\n${SOUND_RULE}` : CALL_RULES);
+  const { name, system } = await prepare(line, sounds ? `${CALL_RULES}\n${SOUND_RULE}` : CALL_RULES, messages);
   const turns = toTurns(messages.slice(-CONTEXT_MESSAGES));
   if (opening) {
     const cue = `[${stamp(Date.now())}] (ta 给你打来了语音电话,你接了起来,先开口)`;
@@ -342,10 +428,10 @@ async function microBatch(line, name, messages, now, force) {
     const memory = await loadMemory();
     const pending = spoken(messages).filter((m) => m.id > memory.upToId);
     if (!pending.length) break;
-    const idle = now - pending[pending.length - 1].t;
-    if (!force && idle < IDLE_MS && pending.length < PENDING_MAX) break;
+    // 平时攒够 30 条才整理,每次正好整理 30 条;手动点"现在整理"时不管攒了多少都整理
+    if (!force && pending.length < EVERY) break;
 
-    const batch = pending.slice(0, BATCH_MAX);
+    const batch = pending.slice(0, force ? BATCH_MAX : EVERY);
     const raw = await chat(line, microPrompt(name, memory, batch, now), { temperature: 0.3, json: true });
     const update = parseJSON(raw);
 
