@@ -341,16 +341,29 @@ const linesOf = (raw) =>
     .map((text) => text.replace(/^\s*\[[^\]\n]{0,30}\]\s*/, '').trim())
     .filter(Boolean);
 
+// 真人发微信很少在句末打句号,去掉。问号、感叹号、省略号留着
+const casual = (text) => text.replace(/(?<!。)。$/u, '');
+
 // 打字聊天:根据到目前为止的聊天记录,生成他的下一轮回复。返回他的名字和拆好的气泡
-export async function reply(messages) {
+// cue 是只给他看的一句提示,接在聊天记录最后,不会存进聊天记录
+export async function reply(messages, cue = '') {
   const line = await lineFor('chat');
   const { rules } = await loadDefaults();
   const { name, system } = await prepare(line, rules, messages);
-  const raw = await replyInCharacter(line, [
-    { role: 'system', content: system },
-    ...toTurns(messages.slice(-CONTEXT_MESSAGES)),
-  ]);
-  return { name, bubbles: linesOf(raw || FALLBACK) };
+  const turns = toTurns(messages.slice(-CONTEXT_MESSAGES));
+  if (cue) turns.push({ role: 'user', content: `[${stamp(Date.now())}] ${cue}` });
+  const raw = await replyInCharacter(line, [{ role: 'system', content: system }, ...turns]);
+  return { name, bubbles: linesOf(raw || FALLBACK).map(casual) };
+}
+
+// 隔了一阵你再打开小手机时,他先找你。hours 是离上次说话过了多久,没聊过就是 null
+export function opener(messages, hours) {
+  const gap = hours === null ? '你们还没聊过天' : `距离你们上次说话已经过了大约 ${Math.round(hours)} 小时`;
+  return reply(
+    messages,
+    `(这条是系统提示,不是 ta 发的:ta 刚拿起手机,${gap}。你主动给 ta 发消息,就像你算好 ta 这会儿有空。` +
+      '可以说你自己刚遇到的事、转一个你刷到的东西,或者顺着 ta 现在大概的状态接上。不要问 ta 在干嘛,也不要提到这条提示。)',
+  );
 }
 
 // 把"一行英文、一行中文"的回复配成对:[{ en, zh }]。靠有没有汉字来分辨哪行是哪种

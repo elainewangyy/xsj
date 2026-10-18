@@ -21,6 +21,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const PAGE = 200; // 一次显示多少条,更早的点按钮再加载
 const GAP = 5 * 60 * 1000; // 两条消息隔这么久,中间显示一次时间
 const WAIT = 2500; // 你发完等这么久他才开始回,所以连发几条他会一起回
+const OPEN_GAP = 3 * 60 * 60 * 1000; // 隔了这么久没说话,你再打开时他会先找你
 
 let messages = [];
 let shown = PAGE;
@@ -117,37 +118,54 @@ function scheduleReply(delay = WAIT) {
   replyTimer = setTimeout(runReply, delay);
 }
 
+// 他发一轮消息:一条一条发出来,字多的那条"打"得久一点。extra 会存进每条气泡
+async function deliver(produce, extra = {}) {
+  replying = true;
+  hideNotice();
+  setTyping(true);
+  try {
+    const { name, bubbles } = await produce();
+    $('name').textContent = name;
+    for (const text of bubbles) {
+      setTyping(true);
+      await sleep(Math.min(400 + text.length * 60, 2200));
+      setTyping(false);
+      await addMessage('assistant', text, extra);
+    }
+  } finally {
+    setTyping(false);
+    replying = false;
+  }
+  // 他回的时候你又发了新消息,接着回
+  if (messages[messages.length - 1].role === 'user') scheduleReply();
+  maintainQuietly();
+}
+
 async function runReply() {
   const last = messages[messages.length - 1];
   if (replying || inCall() || !last || last.role !== 'user') return;
   if ($('input').value.trim()) return scheduleReply(); // 你还在打字,他再等等
   if (!navigator.onLine) return showNotice('现在没有网络。连上之后他会回你。');
 
-  replying = true;
-  hideNotice();
-  setTyping(true);
-  let ok = false;
   try {
-    const { name, bubbles } = await brain.reply(messages);
-    $('name').textContent = name;
-    // 一条一条发出来,字多的那条"打"得久一点
-    for (const text of bubbles) {
-      setTyping(true);
-      await sleep(Math.min(400 + text.length * 60, 2200));
-      setTyping(false);
-      await addMessage('assistant', text);
-    }
-    ok = true;
+    await deliver(() => brain.reply(messages));
   } catch (err) {
     if (err.message.includes('API Key')) showNotice(`${err.message}。`, '去设置', openSettings);
     else showNotice(`这条没回成:${err.message}。`, '重试', runReply);
   }
-  setTyping(false);
-  replying = false;
+}
 
-  // 他回的时候你又发了新消息,接着回
-  if (ok && messages[messages.length - 1].role === 'user') scheduleReply();
-  if (ok) maintainQuietly();
+// 隔了一阵你再打开小手机,他先找你。你没回他之前不会再发第二次,免得刷屏
+async function maybeOpen() {
+  if (replying || inCall() || !navigator.onLine || $('input').value.trim()) return;
+  const last = spoken(messages).at(-1);
+  if (last && (last.role === 'user' || last.opener || Date.now() - last.t < OPEN_GAP)) return;
+  if (!(await brain.lineFor('chat')).apiKey || replying) return;
+  const hours = last ? (Date.now() - last.t) / 3600000 : null;
+  // 失败了就算了,不弹提示:这一轮本来就是他主动的,你不会知道少了什么
+  await deliver(() => brain.opener(messages, hours), { opener: true }).catch((err) =>
+    console.warn('主动找你没成功:', err.message),
+  );
 }
 
 // ---------- 记忆页 ----------
@@ -678,7 +696,9 @@ addEventListener('online', runReply);
 // 开着的时候每分钟看一眼,切回来的时候也看一眼:有没有聊完该整理的记忆
 setInterval(maintainQuietly, 60 * 1000);
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) maintainQuietly();
+  if (document.hidden) return;
+  maintainQuietly();
+  maybeOpen();
 });
 
 async function init() {
@@ -692,7 +712,10 @@ async function init() {
 
   const line = await brain.lineFor('chat');
   if (!line.apiKey) showNotice('先去设置里填 API Key,就能开始聊了。', '去设置', openSettings);
-  else runReply(); // 上次你发了他还没回的,接着回
+  else {
+    runReply(); // 上次你发了他还没回的,接着回
+    maybeOpen();
+  }
   maintainQuietly();
 
   // 装到主屏幕后断网也能打开。在电脑上本地调试时不启用,免得改了代码看不到
