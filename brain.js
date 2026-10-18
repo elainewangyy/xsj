@@ -27,6 +27,20 @@ export const PRESETS = [
   { label: 'Grok', apiBaseUrl: 'https://api.x.ai/v1', models: [] },
 ];
 
+// 能看图的模型。设置里点"加一条看图线路"时,已经有哪家的 Key 就优先用哪家,都没有就用第一家
+export const VISION_PRESETS = [
+  {
+    label: '通义千问',
+    apiBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    models: ['qwen-vl-max', 'qwen-vl-plus', 'qwen3-vl-plus'],
+  },
+  {
+    label: '硅基流动',
+    apiBaseUrl: 'https://api.siliconflow.cn/v1',
+    models: ['Qwen/Qwen2.5-VL-72B-Instruct', 'Qwen/Qwen3-VL-32B-Instruct'],
+  },
+];
+
 // 一条"线路"= 一家 AI + 一个 Key + 一个模型。可以接好几条,再用 routes 决定什么时候用哪条
 export const newLine = (preset = PRESETS[0]) => ({
   id: Math.random().toString(36).slice(2, 8),
@@ -224,6 +238,22 @@ export async function chat(line, messages, { temperature = line.temperature, jso
 
 export const testConnection = (line) =>
   chat(line, [{ role: 'user', content: '回复一个"好"字' }], { temperature: 0 });
+
+// 试试这条线路能不能看图。image 是一张小图(界面现画的),返回它说图里是什么
+export const testVision = (line, image) =>
+  chat(
+    line,
+    [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: '这张图是什么颜色?只回答颜色。' },
+          { type: 'image_url', image_url: { url: image } },
+        ],
+      },
+    ],
+    { temperature: 0 },
+  );
 
 // 问这家现在有哪些能聊天的模型。问不到就返回空,不算错
 export async function listModels(line) {

@@ -434,18 +434,62 @@ function addLineCard(line) {
   field('.line-test').onclick = async () => {
     field('.line-result').textContent = '测试中…';
     const draft = { ...readLine(card), temperature: 0 };
-    // 先问问这家现在有哪些模型,列成按钮。问不到也没关系
+    const forVision = $('route-vision').value === card.dataset.id;
+    // 先问问这家现在有哪些模型,列成按钮。问不到也没关系。看图线路只列名字像看图模型的
     const models = await brain.listModels(draft);
-    if (models.length) showModels(card, models);
+    const visionModels = models.filter((model) => /vl|vision|omni/i.test(model));
+    const listed = forVision && visionModels.length ? visionModels : models;
+    if (listed.length) showModels(card, listed);
     try {
       await brain.testConnection(draft);
-      field('.line-result').textContent = '能连上。';
     } catch (err) {
       field('.line-result').textContent = `不行:${err.message}`;
+      return;
+    }
+    if (!forVision) {
+      field('.line-result').textContent = '能连上。';
+      return;
+    }
+    // 这条是看图用的,再发一张红色小图,看它认不认得出来
+    field('.line-result').textContent = '能连上,再试试看图…';
+    try {
+      const answer = await brain.testVision(draft, redSquare());
+      field('.line-result').textContent = `能连上,也能看图(给它一张红色的图,它说:${answer.slice(0, 20)})。`;
+    } catch (err) {
+      field('.line-result').textContent = `能连上,但看不了图:${err.message}。换一个名字里带 VL 的模型试试`;
     }
   };
 
   $('lines').append(card);
+  return card;
+}
+
+// 一键加一条看图线路,并设成"看图片"用的。已经有通义千问或硅基流动的 Key 就直接借来
+function addVisionLine() {
+  const lines = readLines();
+  const keyOf = (preset) => (lines.find((line) => line.apiBaseUrl === preset.apiBaseUrl && line.apiKey) || {}).apiKey;
+  const preset = brain.VISION_PRESETS.find(keyOf) || brain.VISION_PRESETS[0];
+  const line = { ...brain.newLine(preset), label: '看图', model: preset.models[0], apiKey: keyOf(preset) || '' };
+  const card = addLineCard(line);
+  showModels(card, preset.models);
+  fillRoutes();
+  $('route-vision').value = line.id;
+  card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  const field = card.querySelector(line.apiKey ? '.line-test' : '.line-key');
+  field.focus({ preventScroll: true });
+  card.querySelector('.line-result').textContent = line.apiKey
+    ? `借用了${preset.label}线路的 Key,点"测试连接"看看能不能看图。`
+    : `填上${preset.label}的 Key,再点"测试连接"看看能不能看图。`;
+}
+
+// 测试看图用的小图:一块红色
+function redSquare() {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 64;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#e53935';
+  ctx.fillRect(0, 0, 64, 64);
+  return canvas.toDataURL('image/png');
 }
 
 async function openSettings() {
@@ -752,6 +796,11 @@ $('eleven-key').addEventListener('change', () => loadElevenVoices($('eleven-voic
 $('eleven-sample').addEventListener('click', () => {
   const chosen = elevenList.find((v) => v.id === $('eleven-voice').value);
   if (chosen && chosen.sample) new Audio(chosen.sample).play();
+});
+$('add-vision-line').addEventListener('click', addVisionLine);
+$('route-vision').addEventListener('change', () => {
+  // 换了看图线路,之前的测试结果可能不算数了
+  for (const result of document.querySelectorAll('.line-result')) result.textContent = '';
 });
 $('add-line').addEventListener('click', () => {
   addLineCard(brain.newLine());
