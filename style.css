@@ -131,6 +131,24 @@ button { cursor: pointer; }
   border-bottom-left-radius: 6px;
 }
 
+/* 图片气泡:不要底色和内边距,图片自己就是气泡 */
+.msg.image { padding: 0; overflow: hidden; background: none; line-height: 0; cursor: zoom-in; }
+.msg.image img { display: block; max-width: 100%; max-height: 260px; border-radius: inherit; }
+.msg.image.user { border-bottom-right-radius: 6px; }
+
+/* 全屏看大图 */
+#viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+  background: rgba(0, 0, 0, 0.92);
+  cursor: zoom-out;
+}
+#viewer img { max-width: 100%; max-height: 100%; object-fit: contain; }
+
 /* 电话里的气泡:上面原话,下面一条细线和中文 */
 .msg-zh { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); font-size: 14px; opacity: 0.85; }
 
@@ -188,6 +206,8 @@ button { cursor: pointer; }
   border-top: 1px solid var(--line);
 }
 
+#notice-action { flex: none; white-space: nowrap; }
+
 /* 输入栏 */
 .composer {
   display: flex;
@@ -197,6 +217,7 @@ button { cursor: pointer; }
   background: var(--bg);
   border-top: 1px solid var(--line);
 }
+#pick-image { flex: none; width: 40px; height: 40px; fill: var(--muted); }
 #input {
   flex: 1;
   min-height: 40px;

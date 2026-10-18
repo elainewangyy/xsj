@@ -7,6 +7,7 @@ import {
   dayKey,
   stamp,
   spoken,
+  said,
   renderMemory,
   microPrompt,
   nightlyPrompt,
@@ -19,7 +20,7 @@ import {
 // models 是填 Key 之前先给的默认模型名;填了 Key 点"测试连接",会向那家要一份最新的模型列表
 export const PRESETS = [
   { label: 'DeepSeek', apiBaseUrl: 'https://api.deepseek.com', models: ['deepseek-flash', 'deepseek-v4-pro'] },
-  { label: '通义千问', apiBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', models: ['qwen-plus', 'qwen-max'] },
+  { label: '通义千问', apiBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', models: ['qwen-plus', 'qwen-max', 'qwen-vl-max'] },
   { label: '硅基流动', apiBaseUrl: 'https://api.siliconflow.cn/v1', models: [] },
   { label: '豆包', apiBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3', models: [] },
   { label: '混元', apiBaseUrl: 'https://api.hunyuan.cloud.tencent.com/v1', models: [] },
@@ -37,8 +38,8 @@ export const newLine = (preset = PRESETS[0]) => ({
 
 const DEFAULT_SETTINGS = {
   lines: [],
-  // 每个场合用哪条线路(填线路的 id)。night、memory、call 留空就跟日常聊天用同一条
-  routes: { chat: '', night: '', memory: '', call: '' },
+  // 每个场合用哪条线路(填线路的 id)。night、memory、call、vision 留空就跟日常聊天用同一条
+  routes: { chat: '', night: '', memory: '', call: '', vision: '' },
   nightFrom: '23:00',
   nightTo: '05:00',
   nightPrompt: '', // 深夜时段额外加给他的设定,你自己在设置里填。打字和打电话都会用上
@@ -127,14 +128,15 @@ function isNight(settings, now) {
   return from <= to ? clock >= from && clock < to : clock >= from || clock < to;
 }
 
-// 这个场合现在该用哪条线路。purpose:'chat' 聊天,'call' 打电话,'memory' 整理记忆
+// 这个场合现在该用哪条线路。purpose:'chat' 聊天,'call' 打电话,'memory' 整理记忆,'vision' 看图片
 export async function lineFor(purpose, now = Date.now()) {
   const settings = await loadSettings();
   const byId = (id) => settings.lines.find((line) => line.id === id);
   let line = byId(settings.routes.chat);
-  if (purpose !== 'memory' && isNight(settings, now)) line = byId(settings.routes.night) || line;
+  if (purpose !== 'memory' && purpose !== 'vision' && isNight(settings, now)) line = byId(settings.routes.night) || line;
   if (purpose === 'call') line = byId(settings.routes.call) || line;
   if (purpose === 'memory') line = byId(settings.routes.memory) || line;
+  if (purpose === 'vision') line = byId(settings.routes.vision) || line;
   return { ...line, temperature: settings.temperature };
 }
 
@@ -251,7 +253,7 @@ function toTurns(messages) {
       continue;
     }
     if (m.role !== 'user' && m.role !== 'assistant') continue;
-    let content = m.content;
+    let content = said(m);
     if (m.role === 'user' && note) content = `(${note} 已经结束,现在回到打字聊天)${content}`;
     if (m.role === 'user') note = '';
     const last = turns[turns.length - 1];
@@ -281,6 +283,49 @@ async function replyInCharacter(line, messages) {
     console.warn('出戏了,重试一次:', raw.slice(0, 80));
   }
   return null;
+}
+
+// ---------- 看图片 ----------
+
+// 图片先交给能看图的线路写成一段文字,存在那条消息上,之后聊天和记忆都用这段文字
+// 这样日常聊天的模型不用会看图,同一张图也只看一次
+const VISION_PROMPT = `这是聊天里对方发来的一张图片。用中文把你看到的写下来,要具体:
+- 画面里有什么、在哪里、大概什么时候,人物的动作和表情,整体的氛围
+- 图里有文字(截图、聊天记录、菜单、海报)就尽量原样抄下来
+- 能看出是什么的(某道菜、某个地方、某个游戏、某个表情包)直接说出来
+只写看到的内容,不要评价,不要猜对方的用意,不超过 300 字。`;
+
+async function describe(line, image) {
+  try {
+    const text = await chat(
+      line,
+      [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: VISION_PROMPT },
+            { type: 'image_url', image_url: { url: image } },
+          ],
+        },
+      ],
+      { temperature: 0.2 },
+    );
+    return text.replace(/\s*\n\s*/g, ' ');
+  } catch (err) {
+    if (err.message.includes('API Key')) throw err;
+    throw new Error(`看图片没成(${err.message})。如果是模型不会看图,去设置里给"看图片"选一条能看图的线路`);
+  }
+}
+
+// 最近还没看过的图片,一张张看完,把描述存回那条消息。messages 里的消息会被直接改掉
+async function seeImages(messages) {
+  const unseen = messages.slice(-CONTEXT_MESSAGES).filter((m) => m.image && !m.desc);
+  if (!unseen.length) return;
+  const line = await lineFor('vision');
+  for (const m of unseen) {
+    m.desc = await describe(line, m.image);
+    await store.putMessage(m);
+  }
 }
 
 // ---------- 深夜设定和安全词 ----------
@@ -346,14 +391,19 @@ const casual = (text) => text.replace(/(?<!。)。$/u, '');
 
 // 打字聊天:根据到目前为止的聊天记录,生成他的下一轮回复。返回他的名字和拆好的气泡
 // cue 是只给他看的一句提示,接在聊天记录最后,不会存进聊天记录
+// 图片没看成也照样回(他会当作图没加载出来),原因放在 warning 里给界面提示
 export async function reply(messages, cue = '') {
+  const warning = await seeImages(messages).then(
+    () => '',
+    (err) => err.message,
+  );
   const line = await lineFor('chat');
   const { rules } = await loadDefaults();
   const { name, system } = await prepare(line, rules, messages);
   const turns = toTurns(messages.slice(-CONTEXT_MESSAGES));
   if (cue) turns.push({ role: 'user', content: `[${stamp(Date.now())}] ${cue}` });
   const raw = await replyInCharacter(line, [{ role: 'system', content: system }, ...turns]);
-  return { name, bubbles: linesOf(raw || FALLBACK).map(casual) };
+  return { name, bubbles: linesOf(raw || FALLBACK).map(casual), warning };
 }
 
 // 隔了一阵你再打开小手机时,他先找你。hours 是离上次说话过了多久,没聊过就是 null
@@ -389,11 +439,12 @@ const REALTIME_RULES = `## 现在是语音通话
 
 // 准备 Grok 实时通话:系统提示词里放人设、规则、记忆和最近的聊天记录,让他接着平时的话头聊
 export async function realtimeSetup(messages) {
+  await seeImages(messages).catch((err) => console.warn(err.message)); // 看不了图也照样能打电话
   const line = await lineFor('chat');
   const { name, system } = await prepare(line, REALTIME_RULES, messages);
   const recent = spoken(messages)
     .slice(-30)
-    .map((m) => `[${stamp(m.t)}] ${m.role === 'user' ? 'ta' : name}:${m.content}`)
+    .map((m) => `[${stamp(m.t)}] ${m.role === 'user' ? 'ta' : name}:${said(m)}`)
     .join('\n');
   const now = new Date().toLocaleString('zh-CN', { dateStyle: 'full', timeStyle: 'short' });
   const instructions = [system, recent && `## 最近的聊天记录\n${recent}`, `现在是 ${now}。`]
@@ -418,6 +469,7 @@ export async function translate(text) {
 // 打电话:生成他接下来要说的几句话,每句带英文和中文
 // opening 表示电话刚接通,他先开口;sounds 表示现在用的声音能念出笑声叹气
 export async function callReply(messages, { opening = false, sounds = false } = {}) {
+  await seeImages(messages).catch((err) => console.warn(err.message));
   const line = await lineFor('call');
   const { name, system } = await prepare(line, sounds ? `${CALL_RULES}\n${SOUND_RULE}` : CALL_RULES, messages);
   const turns = toTurns(messages.slice(-CONTEXT_MESSAGES));

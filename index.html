@@ -44,10 +44,17 @@
     </div>
 
     <footer class="composer">
+      <button id="pick-image" class="icon-button" aria-label="发图片">
+        <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm0 16H5V5h14v14zm-5.04-6.71-2.75 3.54-1.96-2.36L6.5 17h11l-3.54-4.71zM8.5 10a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z"/></svg>
+      </button>
+      <input id="image-file" type="file" accept="image/*" multiple hidden>
       <textarea id="input" rows="1" placeholder="发消息" enterkeyhint="send" autocomplete="off"></textarea>
       <button id="send" disabled>发送</button>
     </footer>
   </div>
+
+  <!-- 点聊天里的图片,全屏看大图。点哪里都关掉 -->
+  <div id="viewer" hidden><img alt="图片"></div>
 
   <section id="call" class="page" hidden>
     <div class="call-top">
@@ -138,6 +145,10 @@
       <label>整理记忆
         <select id="route-memory"></select>
       </label>
+      <label>看图片
+        <select id="route-vision"></select>
+      </label>
+      <p class="hint">你发的图片先交给这条线路看一遍,写成文字再给他,所以日常聊天用不会看图的模型也没关系。这条线路的模型要能看图,比如通义千问的 qwen-vl-max、硅基流动的 Qwen/Qwen2.5-VL-72B-Instruct。DeepSeek 看不了图。</p>
 
       <h2>语音和电话</h2>
       <p class="hint">打电话时他说英文,字幕是英文加中文。你说中文英文都行。</p>

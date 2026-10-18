@@ -22,6 +22,7 @@ const PAGE = 200; // 一次显示多少条,更早的点按钮再加载
 const GAP = 5 * 60 * 1000; // 两条消息隔这么久,中间显示一次时间
 const WAIT = 2500; // 你发完等这么久他才开始回,所以连发几条他会一起回
 const OPEN_GAP = 3 * 60 * 60 * 1000; // 隔了这么久没说话,你再打开时他会先找你
+const IMAGE_SIDE = 1280; // 图片最长边缩到这么多像素再存,看得清,也不占地方
 
 let messages = [];
 let shown = PAGE;
@@ -55,10 +56,33 @@ function messageNodes(msg, prev) {
     note.className = 'time';
     note.textContent = msg.content;
     nodes.push(note);
+  } else if (msg.image) {
+    nodes.push(imageNode(msg));
+    if (msg.content) nodes.push(bubbleNode(msg.role, msg.content));
   } else {
     nodes.push(bubbleNode(msg.role, msg.content, msg.zh));
   }
   return nodes;
+}
+
+function imageNode(msg) {
+  const bubble = document.createElement('div');
+  bubble.className = `msg image ${msg.role}`;
+  const img = document.createElement('img');
+  img.src = msg.image;
+  img.alt = msg.desc || '图片';
+  img.loading = 'lazy';
+  // 图片加载出来会把聊天撑高,还在最底下的话跟着滚到底
+  img.onload = () => {
+    const chat = $('chat');
+    if (chat.scrollHeight - chat.scrollTop - chat.clientHeight < img.height + 80) scrollToBottom();
+  };
+  bubble.append(img);
+  bubble.onclick = () => {
+    $('viewer').querySelector('img').src = msg.image;
+    $('viewer').hidden = false;
+  };
+  return bubble;
 }
 
 function render() {
@@ -113,6 +137,42 @@ async function send() {
   scheduleReply();
 }
 
+// 把照片缩小、转成 JPEG,变成一串文字(data URL)存起来。手机拍的照片动辄几 MB,原样存太占地方
+async function shrink(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    const scale = Math.min(1, IMAGE_SIDE / Math.max(img.naturalWidth, img.naturalHeight));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(img.naturalWidth * scale);
+    canvas.height = Math.round(img.naturalHeight * scale);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff'; // 透明的 PNG 转 JPEG 会变黑底,先铺一层白
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/jpeg', 0.85);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+async function sendImages(files) {
+  const images = [...files].filter((file) => file.type.startsWith('image/'));
+  for (const file of images) {
+    let image;
+    try {
+      image = await shrink(file);
+    } catch {
+      showNotice('这张图片打不开,换一张试试。');
+      continue;
+    }
+    await addMessage('user', '', { image });
+  }
+  if (images.length) scheduleReply();
+}
+
 function scheduleReply(delay = WAIT) {
   clearTimeout(replyTimer);
   replyTimer = setTimeout(runReply, delay);
@@ -124,7 +184,7 @@ async function deliver(produce, extra = {}) {
   hideNotice();
   setTyping(true);
   try {
-    const { name, bubbles } = await produce();
+    const { name, bubbles, warning } = await produce();
     $('name').textContent = name;
     for (const text of bubbles) {
       setTyping(true);
@@ -132,6 +192,7 @@ async function deliver(produce, extra = {}) {
       setTyping(false);
       await addMessage('assistant', text, extra);
     }
+    if (warning) showNotice(`${warning}。`, '去设置', openSettings);
   } finally {
     setTyping(false);
     replying = false;
@@ -328,7 +389,7 @@ const readLines = () => [...$('lines').children].map(readLine);
 // 三个"用哪条"下拉框的选项跟着上面的线路走。selected 不传就保留现在选的
 function fillRoutes(selected) {
   const lines = readLines();
-  for (const purpose of ['chat', 'night', 'memory', 'call']) {
+  for (const purpose of ['chat', 'night', 'memory', 'call', 'vision']) {
     const select = $(`route-${purpose}`);
     const keep = selected ? selected[purpose] : select.value;
     const options = lines.map((line) => new Option(line.label, line.id));
@@ -432,6 +493,7 @@ async function saveSettings() {
       night: $('route-night').value,
       memory: $('route-memory').value,
       call: $('route-call').value,
+      vision: $('route-vision').value,
     },
     nightFrom: $('night-from').value || settings.nightFrom,
     nightTo: $('night-to').value || settings.nightTo,
@@ -636,6 +698,19 @@ $('input').addEventListener('keydown', (event) => {
   send();
 });
 $('send').addEventListener('click', send);
+$('pick-image').addEventListener('click', () => $('image-file').click());
+$('image-file').addEventListener('change', (event) => {
+  sendImages(event.target.files);
+  event.target.value = '';
+});
+// 在电脑上可以直接把截图粘贴进输入框
+$('input').addEventListener('paste', (event) => {
+  const files = [...event.clipboardData.files].filter((file) => file.type.startsWith('image/'));
+  if (!files.length) return;
+  event.preventDefault();
+  sendImages(files);
+});
+$('viewer').addEventListener('click', () => ($('viewer').hidden = true));
 $('earlier').addEventListener('click', () => {
   const before = $('chat').scrollHeight;
   shown += PAGE;

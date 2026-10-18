@@ -71,6 +71,13 @@ export const stamp = (t) =>
 // 聊天记录里真正说的话。"语音通话 3:20"这种记号不算
 export const spoken = (messages) => messages.filter((m) => m.role === 'user' || m.role === 'assistant');
 
+// 一条消息给 AI 看的文字。图片换成看图时写下的描述,没看成的就当图片没加载出来
+export const said = (m) => {
+  if (!m.image) return m.content;
+  const picture = `[发了一张图片:${m.desc || '图片没加载出来,你看不到内容'}]`;
+  return m.content ? `${picture} ${m.content}` : picture;
+};
+
 const weekday = (t) => new Date(t).toLocaleDateString('zh-CN', { weekday: 'short' });
 
 // 未来两周的日期和星期。AI 自己算"下周三是几号"容易算错,直接给它
@@ -125,7 +132,7 @@ export function renderMemory(memory, now) {
 const SYSTEM = (name) => `你在帮聊天角色"${name}"整理他的记忆。只输出一个 JSON 对象,不要别的文字。`;
 
 const transcriptOf = (messages, name) =>
-  messages.map((m) => `[${stamp(m.t)}] ${m.role === 'user' ? 'ta' : name}:${m.content}`).join('\n');
+  messages.map((m) => `[${stamp(m.t)}] ${m.role === 'user' ? 'ta' : name}:${said(m)}`).join('\n');
 
 // 小整理:一段聊天停下后,压成一条碎片,顺便记下带截止日的短期情况
 export function microPrompt(name, memory, pending, now) {
